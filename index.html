@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Channel Analyzer</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- jsPDF CDN for PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start; /* Align to top for better content flow */
+            min-height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            max-width: 900px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: none; /* Hidden by default */
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .message-box {
+            display: none; /* Hidden by default */
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-weight: 500;
+        }
+        .message-box.error {
+            background-color: #fee2e2;
+            color: #ef4444;
+            border: 1px solid #fca5a5;
+        }
+        .message-box.info {
+            background-color: #dbeafe;
+            color: #2563eb;
+            border: 1px solid #93c5fd;
+        }
+        .message-box.success {
+            background-color: #d1fae5;
+            color: #059669;
+            border: 1px solid #6ee7b7;
+        }
+        .video-card {
+            background-color: #f9fafb;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s ease-in-out;
+        }
+        .video-card:hover {
+            transform: translateY(-3px);
+        }
+        .video-card img {
+            border-radius: 6px;
+            margin-bottom: 10px;
+            width: 100%;
+            height: auto;
+            max-width: 240px; /* Limit thumbnail width */
+            display: block;
+        }
+        .video-card h3 {
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 5px;
+        }
+        .video-card p {
+            font-size: 0.9em;
+            color: #4b5563;
+            line-height: 1.4;
+        }
+        .video-card .date {
+            font-size: 0.8em;
+            color: #6b7280;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-8">YouTube Channel Analyzer</h1>
+
+        <div class="mb-6">
+            <label for="channelInput" class="block text-gray-700 text-sm font-medium mb-2">
+                Enter YouTube Channel ID or URL:
+            </label>
+            <input type="text" id="channelInput" placeholder="e.g., UC_x5XG1OV2P6wRIMAn-HGwA or https://www.youtube.com/@Google"
+                   class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200">
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-4 mb-8">
+            <button id="analyzeButton"
+                    class="flex-1 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition duration-200 shadow-md">
+                Analyze Channel
+            </button>
+            <button id="downloadPdfButton"
+                    class="flex-1 bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition duration-200 shadow-md"
+                    style="display: none;">
+                Download as PDF
+            </button>
+        </div>
+
+        <!-- Message Box for Info/Errors -->
+        <div id="messageBox" class="message-box"></div>
+
+        <!-- Loading Spinner -->
+        <div id="loadingSpinner" class="loading-spinner"></div>
+
+        <!-- Results Display Area -->
+        <div id="resultsContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
+            <!-- Video cards will be dynamically inserted here -->
+        </div>
+    </div>
+
+    <script>
+        // Initialize jsPDF
+        const { jsPDF } = window.jspdf;
+
+        // --- IMPORTANT: REPLACE WITH YOUR YOUTUBE DATA API KEY ---
+        const YOUTUBE_API_KEY = 'YOUR_YOUTUBE_API_KEY'; // <--- Get your API key from Google Cloud Console
+        // ---------------------------------------------------------
+
+        const channelInput = document.getElementById('channelInput');
+        const analyzeButton = document.getElementById('analyzeButton');
+        const downloadPdfButton = document.getElementById('downloadPdfButton');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const messageBox = document.getElementById('messageBox');
+
+        let allVideosData = []; // To store all fetched video metadata
+
+        // Function to display messages (error, info, success)
+        function showMessage(message, type) {
+            messageBox.textContent = message;
+            messageBox.className = `message-box ${type}`;
+            messageBox.style.display = 'block';
+        }
+
+        // Function to hide messages
+        function hideMessage() {
+            messageBox.style.display = 'none';
+        }
+
+        // Function to show/hide loading spinner
+        function showLoading(show) {
+            loadingSpinner.style.display = show ? 'block' : 'none';
+            analyzeButton.disabled = show;
+            channelInput.disabled = show;
+            downloadPdfButton.disabled = show;
+        }
+
+        // Function to extract channel ID from various inputs
+        function getChannelId(input) {
+            // Check if it's already a channel ID (starts with UC)
+            if (input.startsWith('UC') && input.length === 24) { // Typical YouTube channel ID length
+                return input;
+            }
+
+            // Regex for various YouTube channel URL formats
+            const channelIdRegex = /(?:youtube\.com\/(?:c\/|channel\/|user\/|@)([a-zA-Z0-9_-]+))|(?:youtu\.be\/([a-zA-Z0-9_-]+))/;
+            const match = input.match(channelIdRegex);
+
+            if (match) {
+                // For /c/, /channel/, /user/, or @username URLs
+                if (match[1]) {
+                    // This might be a custom URL, we need to resolve it to a channel ID
+                    // For simplicity and direct API use, if it's not 'UC' prefix, we treat it as a custom name
+                    // and will attempt to resolve it later.
+                    return match[1];
+                }
+                // For youtu.be links (less common for channel pages, but included for robustness)
+                if (match[2]) {
+                    return match[2];
+                }
+            }
+            return null; // No valid channel ID found
+        }
+
+        // Function to resolve custom channel names (@username) to actual channel IDs
+        async function resolveChannelName(channelName) {
+            const url = `https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${channelName}&key=${YOUTUBE_API_KEY}`;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.items && data.items.length > 0) {
+                    return data.items[0].id;
+                }
+            } catch (error) {
+                console.error('Error resolving channel name:', error);
+                showMessage('Could not resolve channel name. Please ensure it\'s a valid handle or try the full channel ID/URL.', 'error');
+            }
+            return null;
+        }
+
+        // Main function to fetch channel videos
+        async function fetchChannelVideos() {
+            hideMessage();
+            resultsContainer.innerHTML = '';
+            downloadPdfButton.style.display = 'none';
+            allVideosData = [];
+            showLoading(true);
+
+            let input = channelInput.value.trim();
+            if (!input) {
+                showMessage('Please enter a YouTube Channel ID or URL.', 'error');
+                showLoading(false);
+                return;
+            }
+
+            let channelId = getChannelId(input);
+
+            // If the extracted ID doesn't start with 'UC', it might be a custom handle.
+            if (channelId && !channelId.startsWith('UC')) {
+                showMessage('Attempting to resolve custom channel handle...', 'info');
+                const resolvedId = await resolveChannelName(channelId);
+                if (resolvedId) {
+                    channelId = resolvedId;
+                } else {
+                    showLoading(false);
+                    return; // Error message already shown by resolveChannelName
+                }
+            } else if (!channelId) {
+                showMessage('Invalid YouTube Channel ID or URL format. Please check your input.', 'error');
+                showLoading(false);
+                return;
+            }
+
+            try {
+                // Step 1: Get the uploads playlist ID for the channel
+                const channelResponse = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${channelId}&key=${YOUTUBE_API_KEY}`);
+                if (!channelResponse.ok) {
+                    throw new Error(`Failed to fetch channel details: ${channelResponse.statusText}`);
+                }
+                const channelData = await channelResponse.json();
+
+                if (!channelData.items || channelData.items.length === 0) {
+                    showMessage('Channel not found or no content details available. Please check the ID/URL.', 'error');
+                    showLoading(false);
+                    return;
+                }
+
+                const uploadsPlaylistId = channelData.items[0].contentDetails.relatedPlaylists.uploads;
+                if (!uploadsPlaylistId) {
+                    showMessage('Could not find the uploads playlist for this channel.', 'error');
+                    showLoading(false);
+                    return;
+                }
+
+                showMessage('Fetching videos from channel...', 'info');
+
+                // Step 2: Fetch videos from the uploads playlist
+                let nextPageToken = null;
+                let videoCount = 0;
+                const maxVideosToFetch = 50; // Limit to 50 videos to avoid excessive API calls and PDF size
+
+                do {
+                    let playlistUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=50&key=${YOUTUBE_API_KEY}`;
+                    if (nextPageToken) {
+                        playlistUrl += `&pageToken=${nextPageToken}`;
+                    }
+
+                    const playlistResponse = await fetch(playlistUrl);
+                    if (!playlistResponse.ok) {
+                        throw new Error(`Failed to fetch playlist items: ${playlistResponse.statusText}`);
+                    }
+                    const playlistData = await playlistResponse.json();
+
+                    if (playlistData.items) {
+                        for (const item of playlistData.items) {
+                            if (videoCount >= maxVideosToFetch) break; // Stop if max videos reached
+                            const snippet = item.snippet;
+                            if (snippet.resourceId && snippet.resourceId.videoId) {
+                                allVideosData.push({
+                                    title: snippet.title,
+                                    description: snippet.description,
+                                    publishedAt: snippet.publishedAt,
+                                    videoId: snippet.resourceId.videoId,
+                                    thumbnail: snippet.thumbnails.high ? snippet.thumbnails.high.url : 'https://placehold.co/240x135/e0e0e0/ffffff?text=No+Thumbnail'
+                                });
+                                videoCount++;
+                            }
+                        }
+                    }
+                    nextPageToken = playlistData.nextPageToken;
+
+                } while (nextPageToken && videoCount < maxVideosToFetch);
+
+                if (allVideosData.length === 0) {
+                    showMessage('No videos found for this channel or the channel is empty.', 'info');
+                } else {
+                    displayVideos(allVideosData);
+                    downloadPdfButton.style.display = 'block';
+                    showMessage(`Successfully fetched ${allVideosData.length} videos.`, 'success');
+                }
+
+            } catch (error) {
+                console.error('Error fetching YouTube data:', error);
+                showMessage(`An error occurred: ${error.message}. Please check your API key and input.`, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // Function to display fetched videos
+        function displayVideos(videos) {
+            resultsContainer.innerHTML = ''; // Clear previous results
+            videos.forEach(video => {
+                const videoCard = document.createElement('div');
+                videoCard.className = 'video-card';
+                videoCard.innerHTML = `
+                    <a href="https://www.youtube.com/watch?v=${video.videoId}" target="_blank" rel="noopener noreferrer">
+                        <img src="${video.thumbnail}" alt="${video.title}" onerror="this.onerror=null;this.src='https://placehold.co/240x135/e0e0e0/ffffff?text=Error+Loading+Thumbnail';">
+                    </a>
+                    <h3>${video.title}</h3>
+                    <p>${video.description.substring(0, 100)}${video.description.length > 100 ? '...' : ''}</p>
+                    <p class="date">Published: ${new Date(video.publishedAt).toLocaleDateString()}</p>
+                `;
+                resultsContainer.appendChild(videoCard);
+            });
+        }
+
+        // Function to generate and download PDF
+        function downloadPdf() {
+            if (allVideosData.length === 0) {
+                showMessage('No video data to download. Please analyze a channel first.', 'error');
+                return;
+            }
+
+            const doc = new jsPDF();
+            let yOffset = 10;
+            const margin = 10;
+            const lineHeight = 7; // Adjusted line height for better spacing
+            const maxPageHeight = doc.internal.pageSize.height - margin * 2;
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(16);
+            doc.text('YouTube Channel Video Analysis', margin, yOffset);
+            yOffset += 10;
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(10);
+            doc.text(`Total Videos Analyzed: ${allVideosData.length}`, margin, yOffset);
+            yOffset += 10;
+
+            allVideosData.forEach((video, index) => {
+                // Check if new page is needed
+                if (yOffset + lineHeight * 5 > maxPageHeight) { // Estimate space needed for one video entry
+                    doc.addPage();
+                    yOffset = margin; // Reset yOffset for new page
+                }
+
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(12);
+                doc.text(`${index + 1}. ${video.title}`, margin, yOffset);
+                yOffset += lineHeight;
+
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9);
+                doc.text(`Video ID: ${video.videoId}`, margin, yOffset);
+                yOffset += lineHeight;
+                doc.text(`Published: ${new Date(video.publishedAt).toLocaleDateString()}`, margin, yOffset);
+                yOffset += lineHeight;
+
+                // Split description into lines to fit page width
+                const descriptionLines = doc.splitTextToSize(`Description: ${video.description}`, doc.internal.pageSize.width - margin * 2);
+                doc.text(descriptionLines, margin, yOffset);
+                yOffset += descriptionLines.length * lineHeight;
+
+                yOffset += 5; // Small gap between videos
+            });
+
+            doc.save('youtube_channel_analysis.pdf');
+            showMessage('PDF downloaded successfully!', 'success');
+        }
+
+        // Event Listeners
+        analyzeButton.addEventListener('click', fetchChannelVideos);
+        downloadPdfButton.addEventListener('click', downloadPdf);
+
+        // Initial message for API key
+        window.onload = () => {
+             if (YOUTUBE_API_KEY === 'YOUR_YOUTUBE_API_KEY' || YOUTUBE_API_KEY === '') {
+                showMessage('Please replace "YOUR_YOUTUBE_API_KEY" in the code with your actual YouTube Data API key.', 'error');
+            } else {
+                showMessage('Enter a YouTube Channel ID or URL to get started.', 'info');
+            }
+        };
+
+    </script>
+</body>
+</html>
